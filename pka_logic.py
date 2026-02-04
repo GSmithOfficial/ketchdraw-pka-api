@@ -1,77 +1,92 @@
 """
-pKa calculation logic using UnipKa.
-Apache-2.0 License - uses finlayiainmaclean/unipka wrapper.
+pKa calculation logic using UnipKa
+Lazy loading to avoid startup timeout
 """
-from unipka import UnipKa
-from rdkit import Chem
+
 import math
 
-# Initialize model once (loaded when module imports)
-print("🔄 Loading UnipKa model...")
-calc = UnipKa()
-print("✅ UnipKa model loaded")
+# Global calculator - loaded lazily
+_calculator = None
 
+def get_calculator():
+    """Lazy load the UnipKa calculator"""
+    global _calculator
+    if _calculator is None:
+        from unipka import UnipKa
+        _calculator = UnipKa()
+    return _calculator
 
 def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
     """
-    Calculate pKa and related properties for a molecule.
-    Returns a JSON-serializable dictionary.
+    Calculate pKa properties for a molecule.
+    
+    Args:
+        smiles: SMILES string of the molecule
+        pH: pH value for calculations (default 7.4)
+    
+    Returns:
+        Dictionary with pKa results
     """
-    result = {
-        "input_smiles": smiles,
-        "query_pH": pH,
-        "success": False,
-        "error": None,
-        "pka": {},
-        "logd": None,
-        "state_penalty": None,
-        "dominant_microstate": None,
-        "microstates": []
-    }
+    from rdkit import Chem
+    
+    # Validate SMILES
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return {
+            "success": False,
+            "error": "Invalid SMILES string",
+            "input_smiles": smiles
+        }
     
     try:
-        # Validate SMILES
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            result["error"] = "Invalid SMILES string"
-            return result
+        calc = get_calculator()
         
-        # Canonical SMILES
+        # Get canonical SMILES
         canonical_smiles = Chem.MolToSmiles(mol)
-        result["canonical_smiles"] = canonical_smiles
         
-        # pKa values (handle nan)
-        acidic = calc.get_acidic_macro_pka(smiles)
-        basic = calc.get_basic_macro_pka(smiles)
-        result["pka"]["acidic"] = None if math.isnan(acidic) else round(acidic, 2)
-        result["pka"]["basic"] = None if math.isnan(basic) else round(basic, 2)
+        # Calculate pKa values
+        acidic_pka = calc.get_acidic_macro_pka(mol)
+        basic_pka = calc.get_basic_macro_pka(mol)
         
-        # logD at query pH
-        logd = calc.get_logd(smiles, pH=pH)
-        result["logd"] = round(logd, 3)
+        # Get logD at specified pH
+        logd = calc.get_logd(mol, pH)
         
-        # State penalty
-        penalty_tuple = calc.get_state_penalty(smiles, pH=pH)
-        result["state_penalty"] = round(penalty_tuple[0], 6)
+        # Get state penalty
+        penalty_result = calc.get_state_penalty(mol, pH)
+        state_penalty = penalty_result[0] if isinstance(penalty_result, tuple) else penalty_result
         
-        # Dominant microstate at query pH
-        dominant = calc.get_dominant_microstate(smiles, pH=pH)
-        result["dominant_microstate"] = Chem.MolToSmiles(dominant)
+        # Get dominant microstate
+        dominant = calc.get_dominant_microstate(mol, pH)
+        dominant_smiles = Chem.MolToSmiles(dominant) if dominant else None
         
-        # Full distribution
-        dist_df = calc.get_distribution(smiles, pH=pH)
-        for _, row in dist_df.iterrows():
-            result["microstates"].append({
-                "charge": int(row["charge"]),
-                "smiles": row["smiles"],
-                "population": round(float(row["population"]), 8),
-                "free_energy": round(float(row["free_energy"]), 3),
-                "is_query_mol": bool(row["is_query_mol"])
-            })
+        # Get distribution
+        distribution_df = calc.get_distribution(mol, pH)
+        microstates = []
+        if distribution_df is not None:
+            for _, row in distribution_df.iterrows():
+                microstates.append({
+                    "smiles": row.get("smiles", ""),
+                    "population": float(row.get("population", 0)) if not math.isnan(row.get("population", 0)) else 0
+                })
         
-        result["success"] = True
+        return {
+            "success": True,
+            "input_smiles": smiles,
+            "canonical_smiles": canonical_smiles,
+            "query_pH": pH,
+            "pka": {
+                "acidic": float(acidic_pka) if not math.isnan(acidic_pka) else None,
+                "basic": float(basic_pka) if not math.isnan(basic_pka) else None
+            },
+            "logd": float(logd) if not math.isnan(logd) else None,
+            "state_penalty": float(state_penalty) if not math.isnan(state_penalty) else None,
+            "dominant_microstate": dominant_smiles,
+            "microstates": microstates
+        }
         
     except Exception as e:
-        result["error"] = str(e)
-    
-    return result
+        return {
+            "success": False,
+            "error": str(e),
+            "input_smiles": smiles
+        }
