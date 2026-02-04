@@ -77,6 +77,20 @@ async def health():
 
 @app.post("/pka", response_model=PKaResponse)
 async def calculate_pka(request: PKaRequest):
+    """Calculate pKa properties for a molecule"""
+    import traceback
+    try:
+        result = calculate_pka_properties(request.smiles, request.pH)
+        return result
+    except Exception as e:
+        error_msg = traceback.format_exc()
+        print(f"ERROR in /pka: {error_msg}")  # This will show in Railway logs
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": error_msg,
+            "input_smiles": request.smiles
+        }
     """
     Calculate pKa and related properties for a molecule.
     
