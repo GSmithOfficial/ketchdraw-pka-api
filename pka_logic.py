@@ -35,7 +35,14 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         return {
             "success": False,
             "error": "Invalid SMILES string",
-            "input_smiles": smiles
+            "input_smiles": smiles,
+            "canonical_smiles": None,
+            "query_pH": pH,
+            "pka": {},
+            "logd": None,
+            "state_penalty": None,
+            "dominant_microstate": None,
+            "microstates": []
         }
     
     try:
@@ -48,26 +55,43 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         acidic_pka = calc.get_acidic_macro_pka(mol)
         basic_pka = calc.get_basic_macro_pka(mol)
         
-        # Get logD at specified pH
-        logd = calc.get_logd(mol, pH)
+        # Get logD - NO pH parameter (uses internal default)
+        try:
+            logd = calc.get_logd(mol)
+            logd = float(logd) if logd is not None and not math.isnan(logd) else None
+        except Exception:
+            logd = None
         
         # Get state penalty
-        penalty_result = calc.get_state_penalty(mol, pH)
-        state_penalty = penalty_result[0] if isinstance(penalty_result, tuple) else penalty_result
+        try:
+            penalty_result = calc.get_state_penalty(mol, pH)
+            if isinstance(penalty_result, tuple):
+                state_penalty = float(penalty_result[0]) if not math.isnan(penalty_result[0]) else None
+            else:
+                state_penalty = float(penalty_result) if not math.isnan(penalty_result) else None
+        except Exception:
+            state_penalty = None
         
         # Get dominant microstate
-        dominant = calc.get_dominant_microstate(mol, pH)
-        dominant_smiles = Chem.MolToSmiles(dominant) if dominant else None
+        try:
+            dominant = calc.get_dominant_microstate(mol, pH)
+            dominant_smiles = Chem.MolToSmiles(dominant) if dominant else None
+        except Exception:
+            dominant_smiles = None
         
         # Get distribution
-        distribution_df = calc.get_distribution(mol, pH)
         microstates = []
-        if distribution_df is not None:
-            for _, row in distribution_df.iterrows():
-                microstates.append({
-                    "smiles": row.get("smiles", ""),
-                    "population": float(row.get("population", 0)) if not math.isnan(row.get("population", 0)) else 0
-                })
+        try:
+            distribution_df = calc.get_distribution(mol, pH)
+            if distribution_df is not None:
+                for _, row in distribution_df.iterrows():
+                    pop = row.get("population", 0)
+                    microstates.append({
+                        "smiles": str(row.get("smiles", "")),
+                        "population": float(pop) if pop is not None and not math.isnan(pop) else 0
+                    })
+        except Exception:
+            pass
         
         return {
             "success": True,
@@ -75,11 +99,11 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
             "canonical_smiles": canonical_smiles,
             "query_pH": pH,
             "pka": {
-                "acidic": float(acidic_pka) if not math.isnan(acidic_pka) else None,
-                "basic": float(basic_pka) if not math.isnan(basic_pka) else None
+                "acidic": float(acidic_pka) if acidic_pka is not None and not math.isnan(acidic_pka) else None,
+                "basic": float(basic_pka) if basic_pka is not None and not math.isnan(basic_pka) else None
             },
-            "logd": float(logd) if not math.isnan(logd) else None,
-            "state_penalty": float(state_penalty) if not math.isnan(state_penalty) else None,
+            "logd": logd,
+            "state_penalty": state_penalty,
             "dominant_microstate": dominant_smiles,
             "microstates": microstates
         }
@@ -88,5 +112,12 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         return {
             "success": False,
             "error": str(e),
-            "input_smiles": smiles
+            "input_smiles": smiles,
+            "canonical_smiles": None,
+            "query_pH": pH,
+            "pka": {},
+            "logd": None,
+            "state_penalty": None,
+            "dominant_microstate": None,
+            "microstates": []
         }
