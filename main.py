@@ -4,29 +4,16 @@ Powered by UnipKa (Apache-2.0) by finlayiainmaclean.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+import traceback
 
-from pka_logic import calculate_pka_properties
 
-
-# Request/Response models
+# Request model
 class PKaRequest(BaseModel):
     smiles: str
     pH: Optional[float] = 7.4
-
-
-class PKaResponse(BaseModel):
-    input_smiles: str
-    canonical_smiles: Optional[str] = None
-    query_pH: float
-    success: bool
-    error: Optional[str] = None
-    pka: dict
-    logd: Optional[float] = None
-    state_penalty: Optional[float] = None
-    dominant_microstate: Optional[str] = None
-    microstates: list
 
 
 # Create FastAPI app
@@ -39,15 +26,24 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Global exception handler - catches ALL errors and returns details
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    error_msg = traceback.format_exc()
+    print(f"UNHANDLED ERROR: {error_msg}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": str(exc),
+            "traceback": error_msg
+        }
+    )
+
 # Enable CORS for Ketchdraw frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://gsmithofficial.github.io",  # Your GitHub Pages
-        "http://localhost:3000",              # Local development
-        "http://localhost:8080",
-        "*"  # Remove in production if you want to restrict
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,37 +71,31 @@ async def health():
     return {"status": "healthy"}
 
 
-@app.post("/pka", response_model=PKaResponse)
+@app.post("/pka")
 async def calculate_pka(request: PKaRequest):
-    """Calculate pKa properties for a molecule"""
-    import traceback
-    try:
-        result = calculate_pka_properties(request.smiles, request.pH)
-        return result
-    except Exception as e:
-        error_msg = traceback.format_exc()
-        print(f"ERROR in /pka: {error_msg}")  # This will show in Railway logs
-        return {
-            "success": False,
-            "error": str(e),
-            "traceback": error_msg,
-            "input_smiles": request.smiles
-        }
     """
     Calculate pKa and related properties for a molecule.
     
     - **smiles**: SMILES string of the molecule
     - **pH**: pH value for distribution calculations (default: 7.4)
-    
-    Returns:
-    - Acidic and basic macro pKa values
-    - logD at the specified pH
-    - State penalty (for permeability estimation)
-    - Dominant microstate SMILES at the specified pH
-    - Full list of microstates with populations
     """
-    result = calculate_pka_properties(request.smiles, request.pH)
-    return result
+    try:
+        # Import here for lazy loading
+        from pka_logic import calculate_pka_properties
+        result = calculate_pka_properties(request.smiles, request.pH)
+        return result
+    except Exception as e:
+        error_msg = traceback.format_exc()
+        print(f"ERROR in /pka: {error_msg}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e),
+                "traceback": error_msg,
+                "input_smiles": request.smiles
+            }
+        )
 
 
 if __name__ == "__main__":
