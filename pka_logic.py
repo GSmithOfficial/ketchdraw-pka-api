@@ -127,7 +127,7 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         }
 
 
-def get_distribution_curve(mol, calc, ph_min=0, ph_max=14, steps=71):
+def get_distribution_curve(mol, calc, ph_min=0, ph_max=14, steps=29):
     """
     Calculate distribution curve across pH range for plotting.
     Returns data structure ready for Chart.js or Plotly.
