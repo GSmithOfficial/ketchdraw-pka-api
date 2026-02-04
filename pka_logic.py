@@ -19,13 +19,6 @@ def get_calculator():
 def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
     """
     Calculate pKa properties for a molecule.
-    
-    Args:
-        smiles: SMILES string of the molecule
-        pH: pH value for calculations (default 7.4)
-    
-    Returns:
-        Dictionary with pKa results
     """
     from rdkit import Chem
     
@@ -42,7 +35,8 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
             "logd": None,
             "state_penalty": None,
             "dominant_microstate": None,
-            "microstates": []
+            "microstates": [],
+            "distribution_curve": None
         }
     
     try:
@@ -55,16 +49,16 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         acidic_pka = calc.get_acidic_macro_pka(mol)
         basic_pka = calc.get_basic_macro_pka(mol)
         
-        # Get logD - NO pH parameter (uses internal default)
+        # Get logD - pH as KEYWORD argument
         try:
-            logd = calc.get_logd(mol)
+            logd = calc.get_logd(mol, pH=pH)
             logd = float(logd) if logd is not None and not math.isnan(logd) else None
         except Exception:
             logd = None
         
         # Get state penalty
         try:
-            penalty_result = calc.get_state_penalty(mol, pH)
+            penalty_result = calc.get_state_penalty(mol, pH=pH)
             if isinstance(penalty_result, tuple):
                 state_penalty = float(penalty_result[0]) if not math.isnan(penalty_result[0]) else None
             else:
@@ -74,22 +68,30 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         
         # Get dominant microstate
         try:
-            dominant = calc.get_dominant_microstate(mol, pH)
+            dominant = calc.get_dominant_microstate(mol, pH=pH)
             dominant_smiles = Chem.MolToSmiles(dominant) if dominant else None
         except Exception:
             dominant_smiles = None
         
-        # Get distribution
+        # Get microstates at query pH
         microstates = []
         try:
-            distribution_df = calc.get_distribution(mol, pH)
+            distribution_df = calc.get_distribution(mol, pH=pH)
             if distribution_df is not None:
                 for _, row in distribution_df.iterrows():
                     pop = row.get("population", 0)
                     microstates.append({
                         "smiles": str(row.get("smiles", "")),
+                        "charge": int(row.get("charge", 0)),
                         "population": float(pop) if pop is not None and not math.isnan(pop) else 0
                     })
+        except Exception:
+            pass
+        
+        # Get FULL distribution curve for plotting (pH 0-14)
+        distribution_curve = None
+        try:
+            distribution_curve = get_distribution_curve(mol, calc)
         except Exception:
             pass
         
@@ -105,7 +107,8 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
             "logd": logd,
             "state_penalty": state_penalty,
             "dominant_microstate": dominant_smiles,
-            "microstates": microstates
+            "microstates": microstates,
+            "distribution_curve": distribution_curve
         }
         
     except Exception as e:
@@ -119,5 +122,56 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
             "logd": None,
             "state_penalty": None,
             "dominant_microstate": None,
-            "microstates": []
+            "microstates": [],
+            "distribution_curve": None
         }
+
+
+def get_distribution_curve(mol, calc, ph_min=0, ph_max=14, steps=71):
+    """
+    Calculate distribution curve across pH range for plotting.
+    Returns data structure ready for Chart.js or Plotly.
+    """
+    import numpy as np
+    from rdkit import Chem
+    
+    ph_values = np.linspace(ph_min, ph_max, steps).tolist()
+    
+    # First pass: collect all unique microstates
+    all_smiles = set()
+    for ph in ph_values:
+        try:
+            dist = calc.get_distribution(mol, pH=ph)
+            if dist is not None:
+                for smi in dist['smiles'].tolist():
+                    all_smiles.add(smi)
+        except:
+            pass
+    
+    # Initialize data structure: {smiles: {charge, populations[]}}
+    microstate_data = {}
+    
+    # Second pass: get populations at each pH
+    for i, ph in enumerate(ph_values):
+        try:
+            dist = calc.get_distribution(mol, pH=ph)
+            if dist is not None:
+                # Initialize any new microstates
+                for _, row in dist.iterrows():
+                    smi = str(row['smiles'])
+                    if smi not in microstate_data:
+                        microstate_data[smi] = {
+                            "smiles": smi,
+                            "charge": int(row['charge']),
+                            "populations": [0.0] * len(ph_values)
+                        }
+                    # Set population at this pH
+                    pop = row['population']
+                    microstate_data[smi]["populations"][i] = float(pop) if not math.isnan(pop) else 0.0
+        except:
+            pass
+    
+    return {
+        "ph_values": ph_values,
+        "microstates": list(microstate_data.values())
+    }
