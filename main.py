@@ -71,6 +71,8 @@ async def health():
     return {"status": "healthy"}
 
 
+import asyncio
+
 @app.post("/pka")
 async def calculate_pka(request: PKaRequest):
     """
@@ -80,10 +82,26 @@ async def calculate_pka(request: PKaRequest):
     - **pH**: pH value for distribution calculations (default: 7.4)
     """
     try:
-        # Import here for lazy loading
         from pka_logic import calculate_pka_properties
-        result = calculate_pka_properties(request.smiles, request.pH)
+        
+        # Run heavy computation in a thread pool so we don't block
+        # the event loop (keeps /health responsive, prevents Railway 
+        # from thinking the app is dead)
+        result = await asyncio.wait_for(
+            asyncio.to_thread(calculate_pka_properties, request.smiles, request.pH),
+            timeout=120  # Kill requests that take longer than 2 minutes
+        )
         return result
+    
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={
+                "success": False,
+                "error": "Prediction timed out (>120s). Molecule may be too complex.",
+                "input_smiles": request.smiles
+            }
+        )
     except Exception as e:
         error_msg = traceback.format_exc()
         print(f"ERROR in /pka: {error_msg}")
@@ -92,7 +110,6 @@ async def calculate_pka(request: PKaRequest):
             content={
                 "success": False,
                 "error": str(e),
-                "traceback": error_msg,
                 "input_smiles": request.smiles
             }
         )
