@@ -4,6 +4,7 @@ Lazy loading to avoid startup timeout
 """
 
 import math
+import time
 from rdkit import Chem
 
 # Global calculator - loaded lazily
@@ -20,7 +21,9 @@ def get_calculator():
 def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
     """
     Calculate pKa properties for a molecule.
-    """   
+    """
+    start = time.perf_counter()
+    
     # Validate SMILES
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -94,11 +97,16 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         except Exception:
             pass
         
+        # Log timing to Railway logs
+        elapsed = time.perf_counter() - start
+        print(f"✅ pKa calculated for {canonical_smiles} in {elapsed:.1f}s (pH={pH})")
+        
         return {
             "success": True,
             "input_smiles": smiles,
             "canonical_smiles": canonical_smiles,
             "query_pH": pH,
+            "computation_time_s": round(elapsed, 2),
             "pka": {
                 "acidic": float(acidic_pka) if acidic_pka is not None and not math.isnan(acidic_pka) else None,
                 "basic": float(basic_pka) if basic_pka is not None and not math.isnan(basic_pka) else None
@@ -111,6 +119,8 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         }
         
     except Exception as e:
+        elapsed = time.perf_counter() - start
+        print(f"❌ pKa failed for {smiles} after {elapsed:.1f}s: {e}")
         return {
             "success": False,
             "error": str(e),
