@@ -49,12 +49,17 @@ class PKaRequest(BaseModel):
 # ── Pre-warm the model on startup (Step 2.3) ────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the UnipKa model before accepting traffic."""
+    """Load the UnipKa model and run a warmup inference before accepting traffic."""
     print("⏳ Pre-warming UnipKa model...")
     await asyncio.to_thread(get_calculator)
-    print("✅ UnipKa model ready")
+    print("✅ UnipKa model loaded")
+    
+    # Run a throwaway prediction so PyTorch JIT-compiles everything
+    # before real traffic arrives. Methane is the simplest molecule.
+    print("⏳ Running warmup inference...")
+    await asyncio.to_thread(calculate_pka_properties, "C", 7.4)
+    print("✅ Warmup complete — ready for traffic")
     yield
-
 
 # ── Create FastAPI app ───────────────────────────────────────────────
 app = FastAPI(
@@ -134,7 +139,7 @@ async def calculate_pka(request: PKaRequest):
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(calculate_pka_properties, request.smiles, request.pH),
-            timeout=120
+            timeout=180
         )
         return result
     except asyncio.TimeoutError:
