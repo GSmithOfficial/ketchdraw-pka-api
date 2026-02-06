@@ -4,6 +4,7 @@ Lazy loading to avoid startup timeout
 """
 
 import math
+from rdkit import Chem
 
 # Global calculator - loaded lazily
 _calculator = None
@@ -19,9 +20,7 @@ def get_calculator():
 def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
     """
     Calculate pKa properties for a molecule.
-    """
-    from rdkit import Chem
-    
+    """   
     # Validate SMILES
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -137,7 +136,6 @@ def get_distribution_curve(mol, calc, ph_min=0, ph_max=14, steps=15):
     ~2x speedup with minimal visual difference in the curve.
     """
     import numpy as np
-    from rdkit import Chem
     
     ph_values = np.linspace(ph_min, ph_max, steps).tolist()
     
