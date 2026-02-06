@@ -127,48 +127,44 @@ def calculate_pka_properties(smiles: str, pH: float = 7.4) -> dict:
         }
 
 
-def get_distribution_curve(mol, calc, ph_min=0, ph_max=14, steps=29):
+def get_distribution_curve(mol, calc, ph_min=0, ph_max=14, steps=15):
     """
     Calculate distribution curve across pH range for plotting.
     Returns data structure ready for Chart.js or Plotly.
+    
+    OPTIMIZED: Single pass instead of double pass.
+    Reduced default steps from 29 → 15 (every 1.0 pH unit) for 
+    ~2x speedup with minimal visual difference in the curve.
     """
     import numpy as np
     from rdkit import Chem
     
     ph_values = np.linspace(ph_min, ph_max, steps).tolist()
     
-    # First pass: collect all unique microstates
-    all_smiles = set()
-    for ph in ph_values:
-        try:
-            dist = calc.get_distribution(mol, pH=ph)
-            if dist is not None:
-                for smi in dist['smiles'].tolist():
-                    all_smiles.add(smi)
-        except:
-            pass
-    
-    # Initialize data structure: {smiles: {charge, populations[]}}
+    # Single pass: collect microstates AND populations together
     microstate_data = {}
     
-    # Second pass: get populations at each pH
     for i, ph in enumerate(ph_values):
         try:
             dist = calc.get_distribution(mol, pH=ph)
             if dist is not None:
-                # Initialize any new microstates
                 for _, row in dist.iterrows():
                     smi = str(row['smiles'])
+                    
+                    # First time seeing this microstate? Initialize it
                     if smi not in microstate_data:
                         microstate_data[smi] = {
                             "smiles": smi,
                             "charge": int(row['charge']),
                             "populations": [0.0] * len(ph_values)
                         }
-                    # Set population at this pH
+                    
+                    # Record population at this pH index
                     pop = row['population']
-                    microstate_data[smi]["populations"][i] = float(pop) if not math.isnan(pop) else 0.0
-        except:
+                    microstate_data[smi]["populations"][i] = (
+                        float(pop) if not math.isnan(pop) else 0.0
+                    )
+        except Exception:
             pass
     
     return {
