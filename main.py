@@ -2,13 +2,18 @@
 Ketchdraw pKa API - FastAPI backend for pKa predictions.
 Powered by UnipKa (Apache-2.0) by finlayiainmaclean.
 """
+import asyncio
+import traceback
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
-import traceback
-import asyncio
+
+# Module-level import instead of per-request (Step 2.2)
+from pka_logic import calculate_pka_properties, get_calculator
 
 
 # Request model
@@ -17,14 +22,25 @@ class PKaRequest(BaseModel):
     pH: Optional[float] = 7.4
 
 
+# Pre-warm the model on startup so first user doesn't wait (Step 2.3)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load the UnipKa model before accepting traffic."""
+    print("⏳ Pre-warming UnipKa model...")
+    await asyncio.to_thread(get_calculator)
+    print("✅ UnipKa model ready")
+    yield
+
+
 # Create FastAPI app
 app = FastAPI(
     title="Ketchdraw pKa API",
     description="pKa prediction powered by UnipKa (Apache-2.0). "
                 "Calculates macro/micro pKa, logD, and microstate distributions.",
-    version="0.1.0",
+    version="0.2.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Global exception handler - catches ALL errors and returns details
@@ -82,18 +98,13 @@ async def calculate_pka(request: PKaRequest):
     - **smiles**: SMILES string of the molecule
     - **pH**: pH value for distribution calculations (default: 7.4)
     """
-    try:
-        from pka_logic import calculate_pka_properties
-        
-        # Run heavy computation in a thread pool so we don't block
-        # the event loop (keeps /health responsive, prevents Railway 
-        # from thinking the app is dead)
+   try:
+        # No more "from pka_logic import" here — already imported at top
         result = await asyncio.wait_for(
             asyncio.to_thread(calculate_pka_properties, request.smiles, request.pH),
-            timeout=120  # Kill requests that take longer than 2 minutes
+            timeout=120
         )
-        return result
-    
+        return result  
     except asyncio.TimeoutError:
         return JSONResponse(
             status_code=504,
